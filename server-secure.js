@@ -4,7 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
 const app = express();
 
@@ -15,7 +15,7 @@ app.use(helmet());
 
 // Restrict CORS to only your frontend URL
 app.use(cors({
-  origin: ['http://localhost:5178', 'http://192.168.100.12:5178'],
+  origin: ['http://localhost:5178', 'http://192.168.100.12:5178', 'https://melodic-cocada-5fdb70.netlify.app'],
   methods: ['POST'],
   allowedHeaders: ['Content-Type']
 }));
@@ -33,23 +33,14 @@ const bookingLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// --- 3. EMAIL TRANSPORT SETUP ---
-const transporter = nodemailer.createTransport({
-  service: 'gmail', 
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
+// --- 3. RESEND EMAIL SETUP ---
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Verify email connection on startup
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('❌ Email config error:', error);
-  } else {
-    console.log('✅ Mail server is ready to send messages');
-  }
-});
+// Validate required environment variables
+if (!process.env.RESEND_API_KEY || !process.env.FROM_EMAIL || !process.env.RECEIVER_EMAIL) {
+  console.error('❌ Missing required environment variables. Please check your .env file.');
+  process.exit(1);
+}
 
 // Log startup
 console.log('🚀 Starting Altura Health Strategies secure backend...');
@@ -154,27 +145,27 @@ app.post('/api/booking',
       console.log('📧 Sending visitor confirmation to:', email); // Debug log
       console.log('📧 Sending company copy to:', process.env.RECEIVER_EMAIL); // Debug log
       
-      // Send friendly confirmation to visitor
-      await transporter.sendMail({
-        from: `"Altura Booking System" <${process.env.EMAIL_USER}>`,
-        to: email, // Send to visitor's email who filled out form
-        subject: `Booking Confirmation: ${fullName} - ${organization || 'Individual'}`,
+      // Send confirmation to visitor
+      await resend.emails.send({
+        from: `Altura Health <${process.env.FROM_EMAIL}>`,
+        to: email,
+        subject: `Booking Confirmation: ${fullName}`,
         html: visitorEmail
       });
 
-      // Send detailed booking info to company
-      await transporter.sendMail({
-        from: `"Altura Booking System" <${process.env.EMAIL_USER}>`,
-        to: process.env.RECEIVER_EMAIL, // Send to your admin email for records
-        replyTo: email, // Lets you easily hit "Reply" in your inbox to talk to client
-        subject: `📋 New Booking: ${fullName} - ${organization || 'Individual'}`,
+      // Send copy to admin
+      await resend.emails.send({
+        from: `Altura Booking <${process.env.FROM_EMAIL}>`,
+        to: process.env.RECEIVER_EMAIL,
+        replyTo: email,
+        subject: `📋 New Booking: ${fullName}`,
         html: companyEmail
       });
 
       console.log('✅ Both emails sent successfully'); // Debug log
       res.status(200).json({ message: 'Booking confirmed! Check your email for confirmation.' });
     } catch (error) {
-      console.error('❌ SMTP Error:', error); // Debug log
+      console.error('❌ Resend API Error:', error); // Debug log
       // Generic error to client, so we don't leak server details
       res.status(500).json({ error: 'Failed to process booking. Please try again later.' }); 
     }

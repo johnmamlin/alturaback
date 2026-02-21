@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { Resend } from 'resend';
+import rateLimit from 'express-rate-limit';
 
 dotenv.config();
 
@@ -16,6 +17,18 @@ if (!process.env.RESEND_API_KEY || !process.env.FROM_EMAIL || !process.env.ADMIN
 }
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Rate limiting middleware
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // limit each IP to 5 requests per windowMs
+  message: {
+    error: 'Too many booking requests. Please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
 
 // Input validation middleware
 const validateBooking = (req, res, next) => {
@@ -32,7 +45,7 @@ const validateBooking = (req, res, next) => {
   next();
 };
 
-app.post('/api/booking', validateBooking, async (req, res) => {
+app.post('/api/booking', limiter, validateBooking, async (req, res) => {
   const { fullName, email, phone, organization, serviceType, preferredDate, preferredTime, notes } = req.body;
 
   try {
